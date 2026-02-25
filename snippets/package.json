@@ -1,0 +1,11 @@
+{
+  "name": "bsv-snippets",
+  "contributes": {
+    "snippets": [
+      {
+        "language": "bsv",
+        "path": "./snippets/bsv.json"
+      }
+    ]
+  }
+}
