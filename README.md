@@ -17,9 +17,8 @@ A small **Lua-first Neovim plugin** providing Bluespec SystemVerilog (BSV) synta
 ## Installation
 
 ```bash
-git clone url
-# TODO:
-# installation step
+git clone https://github.com/ArchSerein/bsv-nvim.git ~/.config/nvim/plugins/bsv.nvim
+nvim test.bsv
 ```
 
 ## Tree-sitter parser installation
@@ -28,16 +27,11 @@ This plugin ships only query files. You must install a BSV Tree-sitter parser se
 
 Recommended grammar: https://github.com/yuyuranium/tree-sitter-bsv
 
-```
-```
-```
-```
 ```bash
 git clone https://github.com/yuyuranium/tree-sitter-bsv
 tree-sitter generate
 cc -O2 -fPIC -c src/parser.c
 cc -shared parser.o -o ~/.local/share/nvim/site/parser/bsv.so
-nvim test.bsv
 ```
 
 ## Snippets (LuaSnip)
