@@ -92,7 +92,7 @@ return {
         lsp = {
           enable = true,
           -- optional: force binary if needed
-          -- cmd = { "blues-lsp" },
+          cmd = { "blues-lsp" },
         },
       })
     end,
