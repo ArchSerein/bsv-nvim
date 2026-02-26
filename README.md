@@ -80,33 +80,6 @@ require("lspconfig").blues.setup({})
 
 ## lazy.nvim example
 
-If you currently use this config:
-
-```lua
-return {
-  {
-    dir = vim.fn.stdpath("config") .. "/plugins/bsv.nvim",
-    name = "bsv.nvim",
-    lazy = false,
-    priority = 1000,
-    config = function()
-      vim.treesitter.language.register("bsv", "bsv")
-      vim.api.nvim_create_autocmd("FileType", {
-        pattern = "bsv",
-        callback = function()
-          pcall(vim.treesitter.start)
-        end,
-      })
-      require("bsv").setup({
-        lsp = { enable = true },
-      })
-    end,
-  },
-}
-```
-
-you can simplify it to:
-
 ```lua
 return {
   {
@@ -126,5 +99,3 @@ return {
   },
 }
 ```
-
-Reason: this plugin already handles BSV filetype and Tree-sitter startup in its runtime files, so the extra autocmd is usually unnecessary.
