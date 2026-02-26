@@ -1,12 +1,13 @@
 # bsv.nvim
 
-A small **Lua-first Neovim plugin** providing Bluespec SystemVerilog (BSV) syntax highlighting.
+A small **Lua-first Neovim plugin** for Bluespec SystemVerilog (BSV), including highlighting and LSP integration.
 
 ## Features
 
 - Filetype detection for `.bsv` / `.BSV`
 - Tree-sitter highlighting (preferred) via `queries/bsv/highlights.scm`
 - Fallback Vim regex syntax highlighting via `syntax/bsv.vim`
+- Built-in LSP config for [`blues-lsp`](https://crates.io/crates/blues-lsp)
 - Minimal ftplugin: `commentstring=// %s`
 
 ## Requirements
@@ -41,3 +42,89 @@ To load it:
 
 ```lua
 require("luasnip.loaders.from_vscode").lazy_load()
+```
+
+## LSP (`blues-lsp`)
+
+This plugin ships an LSP config in `lsp/blues.lua` and an optional helper `require("bsv").setup` integration.
+
+### Install `blues-lsp`
+
+`blues-lsp` is published on crates.io, so you can install it with Cargo:
+
+```bash
+cargo install blues-lsp --locked
+```
+
+After installation, check which binary exists in your environment:
+
+```bash
+command -v blues-lsp || command -v blues
+```
+
+`bsv.nvim` defaults to `blues-lsp` and will automatically fall back to `blues` if needed.
+
+### Neovim 0.11+ builtin LSP
+
+```lua
+require("bsv").setup({
+  lsp = { enable = true },
+})
+```
+
+### Manual setup with `nvim-lspconfig`
+
+```lua
+require("lspconfig").blues.setup({})
+```
+
+## lazy.nvim example
+
+If you currently use this config:
+
+```lua
+return {
+  {
+    dir = vim.fn.stdpath("config") .. "/plugins/bsv.nvim",
+    name = "bsv.nvim",
+    lazy = false,
+    priority = 1000,
+    config = function()
+      vim.treesitter.language.register("bsv", "bsv")
+      vim.api.nvim_create_autocmd("FileType", {
+        pattern = "bsv",
+        callback = function()
+          pcall(vim.treesitter.start)
+        end,
+      })
+      require("bsv").setup({
+        lsp = { enable = true },
+      })
+    end,
+  },
+}
+```
+
+you can simplify it to:
+
+```lua
+return {
+  {
+    dir = vim.fn.stdpath("config") .. "/plugins/bsv.nvim",
+    name = "bsv.nvim",
+    lazy = false,
+    priority = 1000,
+    config = function()
+      require("bsv").setup({
+        lsp = {
+          enable = true,
+          -- optional: force binary if needed
+          -- cmd = { "blues-lsp" },
+        },
+      })
+    end,
+  },
+}
+```
+
+Reason: this plugin already handles BSV filetype and Tree-sitter startup in its runtime files, so the extra autocmd is usually unnecessary.
