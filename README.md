@@ -5,9 +5,10 @@ A small **Lua-first Neovim plugin** for Bluespec SystemVerilog (BSV), including 
 ## Features
 
 - Filetype detection for `.bsv` / `.BSV`
-- Tree-sitter highlighting (preferred) via `queries/bsv/highlights.scm`
+- Tree-sitter highlighting (preferred) via `queries/bsv/highlights.scm` (compatible with `todo-comments.nvim`)
 - Fallback Vim regex syntax highlighting via `syntax/bsv.vim`
 - Built-in LSP config for [`blues-lsp`](https://crates.io/crates/blues-lsp)
+- Formatting: prefers LSP; falls back to a conservative 2-space style pass, and auto-registers a Conform formatter
 - Minimal ftplugin: `commentstring=// %s`
 
 ## Requirements
@@ -78,6 +79,12 @@ require("bsv").setup({
 require("lspconfig").blues.setup({})
 ```
 
+## Formatting
+
+- If an LSP client that supports `textDocument/formatting` is attached, `:format`/`gq` will use it.
+- Otherwise a conservative 2-space style pass is used: key whitespace rules from `bsv-style.md` are normalized first, then the buffer is reindented with the same block heuristics as the indent script (enforced even if `shiftwidth` is different).
+- When `conform.nvim` is installed (used by LazyVim), a `bsvfmt` formatter is registered automatically and wired to the `bsv` filetype.
+
 ## lazy.nvim example
 
 ```lua
@@ -94,6 +101,9 @@ return {
           -- optional: force binary if needed
           cmd = { "blues-lsp" },
         },
+        -- Formatting is enabled by default; disable if you prefer your own
+        -- format-on-save stack:
+        -- format = { enable = false },
       })
     end,
   },

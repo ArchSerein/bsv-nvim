@@ -1,7 +1,7 @@
 local M = {}
 
-local increase_re = [[^\s*(module|interface|function|typeclass|instance|method|action|actionvalue|rule)[^=]*[=;]\s*$]]
-local decrease_re = [[^\s*end(module|interface|function|typeclass|instance|method|action|actionvalue|rule)\s*$]]
+local increase_re = [[^\s*(package|module|interface|function|typeclass|instance|method|action|actionvalue|rule)[^=]*[=;]\s*$]]
+local decrease_re = [[^\s*end(package|module|interface|function|typeclass|instance|method|action|actionvalue|rule)\s*$]]
 
 function M.indentexpr()
 	local lnum = vim.v.lnum

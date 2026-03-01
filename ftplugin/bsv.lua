@@ -12,3 +12,11 @@ end)
 
 vim.wo.foldexpr = "v:lua.vim.treesitter.foldexpr()"
 vim.wo.foldmethod = "expr"
+
+-- Formatting: prefer LSP, fallback to heuristic reindent; also registers conform formatter.
+do
+	local ok, fmt = pcall(require, "bsv.format")
+	if ok and fmt then
+		fmt.setup_buffer()
+	end
+end
