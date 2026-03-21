@@ -1,174 +1,16 @@
-[
-  ; "BVI"
-  ; "C"
-  ; "CF"
-  ; "E"
-  ; "SB"
-  ; "SBR"
-  "action"
-  "actionvalue"
-  ; "ancestor"
-  "begin"
-  "clocked_by"
-  "default"
-  ; "default_clock"
-  ; "default_reset"
-  "dependencies"
-  "deriving"
-  "determines"
-  ; "e"
-  ; "enable"
-  "end"
-  "enum"
-  ; "ifc_inout"
-  ; "inout"
-  ; "input_clock"
-  ; "input_reset"
-  "instance"
-  "interface"
-  "let"
-  "match"
-  "matches"
-  "method"
-  "module"
-  "numeric"
-  ; "output_clock"
-  ; "output_reset"
-  "package"
-  "seq"
-  "par"
-  "parameter"
-  ; "path"
-  ; "port"
-  "endaction"
-  "endactionvalue"
-  "endcase"
-  "endinstance"
-  "endinterface"
-  "endmethod"
-  "endmodule"
-  "endpackage"
-  "endseq"
-  "endpar"
-  "provisos"
-  "reset_by"
-  "rules"
-  "endrules"
-  ; "same_family"
-  ; "schedule"
-  "struct"
-  "tagged"
-  "type"
-  "typeclass"
-  "endtypeclass"
-  "union"
-] @keyword
-
-[
-  "\"BDPI\""
-] @string
-
-[
-  "import"
-  "export"
-] @keyword.import
-
-"typedef" @keyword.definition
-
-[
-  "while"
-  "for"
-  "continue"
-  "break"
-] @keyword.repeat
-
-[
- "if"
- "else"
- "case"
-] @keyword.conditional
-
-[
-  "function"
-  "endfunction"
-
-  "rule"
-  "endrule"
-] @keyword.function
-
-"return" @keyword.return
-
-[
-  "bit"
-  "int"
-  "Action"
-  "ActionValue"
-  "void"
-] @type.builtin
-
-[
- "True"
- "False"
-] @boolean
-
-[
-  "+"
-  "-"
-  "!"
-  "~"
-  "&"
-  "~&"
-  "|"
-  "~|"
-  "^"
-  "^~"
-  "~^"
-  "*"
-  "/"
-  "%"
-  "<<"
-  ">>"
-  "<="
-  ">="
-  "<"
-  ">"
-  "=="
-  "!="
-  "|"
-  "&&"
-  "||"
-  "="
-  "<-"
-  "&&&"
-] @operator
-
-[
-  "matches"
-  "valueOf"
-  "valueof"
-  "noAction"
-] @keyword.operator
-
-"?" @constant
-
-[ ";" ":" "," "::" ] @punctuation.delimiter
-
-[ "(" ")" "[" "]" "{" "}"] @punctuation.bracket
-
-(condExpr [ "?" ":" ] @conditional.ternary)
-
-(typeIde) @type
-(typeNat) @type.quantifier
-
-(comment) @comment.documentation @spell
+(comment) @comment @spell
 
 (intLiteral) @number
-(realLiteral) @number
+(realLiteral) @number.float
 (stringLiteral) @string
 
-; Struct member selection
+(typeIde) @type
+(typeNat) @number
+(typeclassIde) @type
+
 (exprPrimary
   "." (identifier) @property)
+
 (lValue
   "." (identifier) @property)
 
@@ -184,52 +26,56 @@
 (structExpr
   (Identifier) @type)
 
-(taggedUnionExpr .
+(taggedUnionExpr
   (Identifier) @type)
 
 (taggedUnionPattern
   (Identifier) @type)
 
-(memberBind .
+(memberBind
   (identifier) @property)
 
 (typedefEnum
   (Identifier) @type)
+
 (typedefEnumElement
   (Identifier) @constant)
 
 (attrName
-  (identifier) @property)
+  (identifier) @attribute)
 
 (typeFormal
   (typeIde (identifier) @parameter))
 
 (subinterfaceDef
-  .
   (Identifier) @type)
 
-(typeclassIde) @type
 (proviso
   (Identifier) @type)
 
 (moduleProto
   (identifier) @constructor)
+
 (moduleFormalParam
   (identifier) @parameter)
+
 (moduleApp
   (identifier) @constructor)
 
 (functionProto
   (identifier) @function)
+
 (functionAssign
   (identifier) @function)
+
 (functionFormal
   (identifier) @parameter)
+
 (functionCall
   (exprPrimary (identifier) @function.call))
 
 (systemTaskStmt
-  (displayTaskName) @function.call)
+  (displayTaskName) @function.builtin)
 
 (systemTaskStmt
   (dollarIdentifier) @function.call)
@@ -238,9 +84,12 @@
 
 (methodProto
   (identifier) @function)
+
 (methodProtoFormal
   (identifier) @parameter)
+
 (methodDef
   (identifier) @function)
+
 (methodFormal
   (identifier) @parameter)

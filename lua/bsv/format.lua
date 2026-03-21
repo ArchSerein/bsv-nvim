@@ -1,102 +1,9 @@
--- lua/bsv/format.lua
--- Lightweight formatting helpers for Bluespec SystemVerilog (BSV).
--- Goals:
--- 1) Prefer LSP formatting when available.
--- 2) Provide a safe fallback style pass so `Format` works even without an LSP.
--- 3) Register a Conform formatter for LazyVim users if conform.nvim is installed.
+local lang = require("bsv.lang")
+local layout = require("bsv.layout")
 
 local M = {}
-local max_columns = 80
 
--- Indentation heuristics shared with indent/bsv.lua
-local decl_openers = {
-  package = true,
-  module = true,
-  interface = true,
-  ["function"] = true,
-  typeclass = true,
-  instance = true,
-  method = true,
-  action = true,
-  actionvalue = true,
-  rule = true,
-}
-
-local decl_closers = {
-  endpackage = true,
-  endmodule = true,
-  endinterface = true,
-  endfunction = true,
-  endtypeclass = true,
-  endinstance = true,
-  endmethod = true,
-  endaction = true,
-  endactionvalue = true,
-  endrule = true,
-}
-
-local block_openers = {
-  begin = true,
-  action = true,
-  actionvalue = true,
-  seq = true,
-  par = true,
-  case = true,
-  rules = true,
-}
-
-local block_closers = {
-  ["end"] = true,
-  endaction = true,
-  endactionvalue = true,
-  endseq = true,
-  endpar = true,
-  endcase = true,
-  endrules = true,
-}
-
-local trailing_block_openers = {
-  begin = true,
-  action = true,
-  actionvalue = true,
-  seq = true,
-  par = true,
-}
-
-local control_keywords = {
-  ["if"] = true,
-  ["for"] = true,
-  ["while"] = true,
-  ["case"] = true,
-}
-
-local paren_keywords = {
-  ["if"] = true,
-  ["for"] = true,
-  ["while"] = true,
-  ["case"] = true,
-}
-
-local protected_ops = {
-  ["<-"] = "\1",
-  ["<="] = "\2",
-  [">="] = "\3",
-  ["=="] = "\4",
-  ["!="] = "\5",
-  ["&&"] = "\6",
-  ["||"] = "\7",
-  ["<<"] = "\8",
-  [">>"] = "\9",
-}
-
-local spaced_single_char_ops = {
-  "+",
-  "*",
-  "/",
-  "%",
-  "<",
-  ">",
-}
+local max_columns = 96
 
 local wrapped_header_keywords = {
   module = true,
@@ -112,500 +19,25 @@ local blocked_wrap_continuations = {
   matches = true,
 }
 
----@param text string
----@return string
+local trim = layout.trim
+local first_keyword = layout.first_keyword
+
 local function escape_lua_pattern(text)
-  return (text:gsub("([^%w])", "%%%1"))
+  return (text:gsub("([^%%w])", "%%%1"))
 end
 
----@param text string
----@return string
-local function trim(text)
-  return (text:gsub("^%s+", ""):gsub("%s+$", ""))
-end
-
----@param line string
----@return string?
-local function first_keyword(line)
-  return line:match("^%s*([%a][%w]*)")
-end
-
----@param line string
----@return boolean
-local function is_decl_opener(line)
-  local keyword = first_keyword(line)
-  return keyword ~= nil and decl_openers[keyword] == true and line:match("[=;]%s*$") ~= nil
-end
-
----@param line string
----@return boolean
-local function is_decl_closer(line)
-  local keyword = first_keyword(line)
-  return keyword ~= nil and decl_closers[keyword] == true
-end
-
----@param line string
----@return boolean
-local function is_block_opener(line)
-  local keyword = first_keyword(line)
-  if keyword ~= nil and block_openers[keyword] == true then
-    return true
-  end
-
-  for opener in pairs(trailing_block_openers) do
-    if line:match("%f[%a]" .. opener .. "%f[%W]%s*$")
-      or line:match("%f[%a]" .. opener .. "%f[%W]%s*//")
-    then
-      return true
-    end
-  end
-
-  return false
-end
-
----@param line string
----@return boolean
-local function is_block_closer(line)
-  local keyword = first_keyword(line)
-  return keyword ~= nil and block_closers[keyword] == true
-end
-
----@param line string
----@return boolean
-local function is_brace_opener(line)
-  return line:match("^%s*typedef%s+struct%s*{[^}]*$") ~= nil
-    or line:match("^%s*typedef%s+enum%s*{[^}]*$") ~= nil
-    or line:match("^%s*typedef%s+union%s+tagged%s*{[^}]*$") ~= nil
-end
-
----@param line string
----@return boolean
-local function is_brace_closer(line)
-  return line:match("^%s*}") ~= nil
-end
-
----@class bsv.ParserState
----@field in_block_comment boolean
----@field in_string boolean
-
----@param line string
----@param parser_state bsv.ParserState
----@return string, bsv.ParserState
-local function strip_analysis_code(line, parser_state)
-  local out = {}
-  local i = 1
-  local in_block_comment = parser_state.in_block_comment
-  local in_string = parser_state.in_string
-
-  while i <= #line do
-    if in_string then
-      local j = i
-      while j <= #line do
-        local str_ch = line:sub(j, j)
-        if str_ch == "\\" then
-          j = j + 2
-        elseif str_ch == "\"" then
-          i = j + 1
-          in_string = false
-          break
-        else
-          j = j + 1
-        end
-      end
-      if in_string then
-        return table.concat(out), {
-          in_block_comment = in_block_comment,
-          in_string = true,
-        }
-      end
-    elseif in_block_comment then
-      local stop = line:find("*/", i, true)
-      if stop then
-        i = stop + 2
-        in_block_comment = false
-      else
-        return table.concat(out), {
-          in_block_comment = true,
-          in_string = false,
-        }
-      end
-    else
-      local pair = line:sub(i, i + 1)
-      local ch = line:sub(i, i)
-
-      if pair == "//" then
-        break
-      elseif pair == "/*" then
-        local stop = line:find("*/", i + 2, true)
-        if stop then
-          i = stop + 2
-        else
-          return table.concat(out), {
-            in_block_comment = true,
-            in_string = false,
-          }
-        end
-      elseif ch == "\"" then
-        local j = i + 1
-        while j <= #line do
-          local str_ch = line:sub(j, j)
-          if str_ch == "\\" then
-            j = j + 2
-          elseif str_ch == "\"" then
-            j = j + 1
-            break
-          else
-            j = j + 1
-          end
-        end
-        table.insert(out, "\"\"")
-        if j > #line and line:sub(#line, #line) ~= "\"" then
-          in_string = true
-          return table.concat(out), {
-            in_block_comment = in_block_comment,
-            in_string = true,
-          }
-        end
-        i = j
-      else
-        table.insert(out, ch)
-        i = i + 1
-      end
-    end
-  end
-
-  return table.concat(out), {
-    in_block_comment = in_block_comment,
-    in_string = in_string,
-  }
-end
-
----@param line string
----@return integer
-local function paren_delta(line)
-  local delta = 0
-  for ch in line:gmatch(".") do
-    if ch == "(" then
-      delta = delta + 1
-    elseif ch == ")" then
-      delta = delta - 1
-    end
-  end
-  return delta
-end
-
----@param code string
----@return integer
-local function continuation_delta(code)
-  local delta = 0
-  for ch in code:gmatch(".") do
-    if ch == "(" or ch == "[" then
-      delta = delta + 1
-    elseif ch == ")" or ch == "]" then
-      delta = delta - 1
-    end
-  end
-  return delta
-end
-
----@param code string
----@return integer
-local function record_brace_delta(code)
-  local delta = 0
-  for ch in code:gmatch(".") do
-    if ch == "{" then
-      delta = delta + 1
-    elseif ch == "}" then
-      delta = delta - 1
-    end
-  end
-  return delta
-end
-
----@param code string
----@return boolean
-local function has_top_level_assignment(code)
-  local paren_depth_local = 0
-  local bracket_depth = 0
-  local brace_depth = 0
-
-  for i = 1, #code do
-    local ch = code:sub(i, i)
-    if ch == "(" then
-      paren_depth_local = paren_depth_local + 1
-    elseif ch == ")" then
-      paren_depth_local = math.max(paren_depth_local - 1, 0)
-    elseif ch == "[" then
-      bracket_depth = bracket_depth + 1
-    elseif ch == "]" then
-      bracket_depth = math.max(bracket_depth - 1, 0)
-    elseif ch == "{" then
-      brace_depth = brace_depth + 1
-    elseif ch == "}" then
-      brace_depth = math.max(brace_depth - 1, 0)
-    elseif ch == "=" and paren_depth_local == 0 and bracket_depth == 0 and brace_depth == 0 then
-      local prev = i > 1 and code:sub(i - 1, i - 1) or ""
-      local next_ch = i < #code and code:sub(i + 1, i + 1) or ""
-      if prev ~= "<" and prev ~= ">" and prev ~= "!" and prev ~= "=" and next_ch ~= "=" then
-        return true
-      end
-    end
-  end
-
-  return false
-end
-
----@param line string
----@param parser_state bsv.ParserState
----@return table, bsv.ParserState
-local function analyze_line(line, parser_state)
-  local code
-  code, parser_state = strip_analysis_code(line, parser_state)
-  local keyword = first_keyword(code)
-  return {
-    code = code,
-    keyword = keyword,
-    blank = code:match("^%s*$") ~= nil,
-    ends_with_semicolon = code:match(";%s*$") ~= nil,
-    closes_decl = keyword ~= nil and decl_closers[keyword] == true,
-    closes_block = keyword ~= nil and block_closers[keyword] == true,
-    closes_brace = is_brace_closer(code),
-    opens_block = is_block_opener(code),
-    opens_brace = is_brace_opener(code),
-    decl_kind = keyword ~= nil and decl_openers[keyword] == true and keyword or nil,
-    paren_delta = paren_delta(code),
-    header_aligned = code:match("^%s*%)") ~= nil or code:match("^%s*provisos%s*%(") ~= nil,
-    has_top_level_assignment = has_top_level_assignment(code),
-    continuation_delta = continuation_delta(code),
-    record_brace_delta = record_brace_delta(code),
-    starts_with_closing_delim = code:match("^%s*[])}]") ~= nil,
-  }, parser_state
-end
-
----@param state table
----@param info table
----@return boolean
-local function is_scope_decl_line(state, info)
-  if info.decl_kind == nil then
-    return false
-  end
-  if not info.ends_with_semicolon or info.paren_delta > 0 then
-    return true
-  end
-
-  if info.has_top_level_assignment then
-    return false
-  end
-
-  if info.decl_kind == "method" then
-    local parent_decl = state.decl_stack[#state.decl_stack]
-    if parent_decl == "interface" or parent_decl == "typeclass" then
-      return false
-    end
-  end
-
-  return true
-end
-
----@param state table
----@return integer
-local function base_depth(state)
-  return #state.decl_stack + state.block_depth + state.brace_depth
-end
-
----@param state table
----@param info table
----@return integer
-local function indent_depth_for_line(state, info)
-  local depth = base_depth(state)
-
-  if info.closes_decl then
-    depth = depth - 1
-  end
-  if info.closes_block then
-    depth = depth - 1
-  end
-  if info.closes_brace then
-    depth = depth - 1
-  end
-
-  local header = state.header_stack[#state.header_stack]
-  if header then
-    local closes_header = header.paren_depth + info.paren_delta <= 0 and info.ends_with_semicolon
-    if closes_header then
-      depth = header.base_depth
-    elseif info.header_aligned then
-      depth = header.base_depth
-    else
-      depth = header.base_depth + 1
-    end
-  end
-
-  return math.max(depth, 0)
-end
-
----@param state table
----@param info table
-local function advance_indent_state(state, info)
-  if info.closes_decl and #state.decl_stack > 0 then
-    table.remove(state.decl_stack)
-  end
-  if info.closes_block and state.block_depth > 0 then
-    state.block_depth = state.block_depth - 1
-  end
-  if info.closes_brace and state.brace_depth > 0 then
-    state.brace_depth = state.brace_depth - 1
-  end
-
-  local header = state.header_stack[#state.header_stack]
-  if header then
-    header.paren_depth = header.paren_depth + info.paren_delta
-    if header.paren_depth <= 0 and info.ends_with_semicolon then
-      table.remove(state.header_stack)
-      local header_info = {
-        decl_kind = header.kind,
-        ends_with_semicolon = true,
-        paren_delta = 0,
-        has_top_level_assignment = header.has_top_level_assignment,
-      }
-      if is_scope_decl_line(state, header_info) then
-        table.insert(state.decl_stack, header.kind)
-      end
-    end
-  elseif info.decl_kind ~= nil then
-    if info.ends_with_semicolon and info.paren_delta <= 0 and is_scope_decl_line(state, info) then
-      table.insert(state.decl_stack, info.decl_kind)
-    elseif not (info.ends_with_semicolon and info.paren_delta <= 0) then
-      table.insert(state.header_stack, {
-        kind = info.decl_kind,
-        base_depth = base_depth(state),
-        paren_depth = math.max(info.paren_delta, 0),
-        has_top_level_assignment = info.has_top_level_assignment,
-      })
-    end
-  end
-
-  if info.opens_block then
-    state.block_depth = state.block_depth + 1
-  end
-  if info.opens_brace then
-    state.brace_depth = state.brace_depth + 1
-  end
-end
-
----@param code string
----@param sw integer
----@return string
-local function normalize_code_chunk(code, sw)
-  if code == "" then
-    return code
-  end
-
-  local leading_keyword = first_keyword(code)
-  code = code:gsub("\t", string.rep(" ", sw))
-  code = code:gsub("%s+([,;%)%]}])", "%1")
-  code = code:gsub("%s*,%s*", ", ")
-  code = code:gsub(";%s*(%S)", "; %1")
-
-  for keyword in pairs(control_keywords) do
-    code = code:gsub("(%f[%a]" .. keyword .. ")%s*%(", "%1 (")
-  end
-
-  for _, keyword in ipairs({ "begin", "action", "actionvalue", "seq", "par" }) do
-    code = code:gsub("%)%s*" .. keyword .. "%f[%W]", ") " .. keyword)
-    code = code:gsub("(%f[%a]else)%s*" .. keyword .. "%f[%W]", "%1 " .. keyword)
-  end
-  code = code:gsub("%)%s*if%s*%(", ") if (")
-  code = code:gsub("(%f[%a]rule%s+[%a_][%w_']*)%s*%(", "%1 (")
-  code = code:gsub("(%f[%a]case%s*%b())%s*matches%f[%W]", "%1 matches")
-  code = code:gsub("(%f[%a]provisos)%s*%(", "%1(")
-
-  code = code:gsub("([%a_][%w_']*)%s+%(", function(word)
-    if paren_keywords[word] then
-      return word .. " ("
-    end
-    return word .. "("
-  end)
-  code = code:gsub("(%f[%a]rule%s+[%a_][%w_']*)%(", "%1 (")
-  code = code:gsub("%(%s+", "(")
-  code = code:gsub("%s+%)", ")")
-
-  for op, token in pairs(protected_ops) do
-    code = code:gsub("%s*" .. escape_lua_pattern(op) .. "%s*", " " .. token .. " ")
-  end
-
-  code = code:gsub("%s*=%s*", " = ")
-
-  if leading_keyword ~= "import" then
-    for _, op in ipairs(spaced_single_char_ops) do
-      code = code:gsub("%s*" .. escape_lua_pattern(op) .. "%s*", function()
-        return " " .. op .. " "
-      end)
-    end
-  end
-
-  for op, token in pairs(protected_ops) do
-    code = code:gsub(token, op)
-  end
-  code = code:gsub("%s*::%s*", "::")
-
-  if leading_keyword ~= "import" and leading_keyword ~= "export" then
-    local colon_index
-    do
-      local paren_depth_local = 0
-      local bracket_depth = 0
-      local brace_depth = 0
-      for i = 1, #code do
-        local ch = code:sub(i, i)
-        if ch == "(" then
-          paren_depth_local = paren_depth_local + 1
-        elseif ch == ")" then
-          paren_depth_local = math.max(paren_depth_local - 1, 0)
-        elseif ch == "[" then
-          bracket_depth = bracket_depth + 1
-        elseif ch == "]" then
-          bracket_depth = math.max(bracket_depth - 1, 0)
-        elseif ch == "{" then
-          brace_depth = brace_depth + 1
-        elseif ch == "}" then
-          brace_depth = math.max(brace_depth - 1, 0)
-        elseif ch == ":" and paren_depth_local == 0 and bracket_depth == 0 and brace_depth == 0 then
-          local prefix = trim(code:sub(1, i - 1))
-          if prefix ~= "" and not prefix:find("?", 1, true) then
-            colon_index = i
-          end
-          break
-        end
-      end
-    end
-
-    if colon_index ~= nil then
-      local left = trim(code:sub(1, colon_index - 1))
-      local right = trim(code:sub(colon_index + 1))
-      code = left .. ":"
-      if right ~= "" then
-        code = code .. " " .. right
-      end
-    end
-  end
-
-  return code
-end
-
----@param text string
----@return integer?
 local function find_matching_paren(text, open_index)
   local depth = 0
   local i = open_index
   while i <= #text do
     local ch = text:sub(i, i)
-    if ch == "\"" then
+    if ch == '"' then
       i = i + 1
       while i <= #text do
         local str_ch = text:sub(i, i)
         if str_ch == "\\" then
           i = i + 2
-        elseif str_ch == "\"" then
+        elseif str_ch == '"' then
           break
         else
           i = i + 1
@@ -623,34 +55,32 @@ local function find_matching_paren(text, open_index)
   end
 end
 
----@param text string
----@return string[]
 local function split_top_level_csv(text)
   local items = {}
   local start_index = 1
-  local paren_depth_local = 0
+  local paren_depth = 0
   local bracket_depth = 0
   local brace_depth = 0
   local i = 1
 
   while i <= #text do
     local ch = text:sub(i, i)
-    if ch == "\"" then
+    if ch == '"' then
       i = i + 1
       while i <= #text do
         local str_ch = text:sub(i, i)
         if str_ch == "\\" then
           i = i + 2
-        elseif str_ch == "\"" then
+        elseif str_ch == '"' then
           break
         else
           i = i + 1
         end
       end
     elseif ch == "(" then
-      paren_depth_local = paren_depth_local + 1
+      paren_depth = paren_depth + 1
     elseif ch == ")" then
-      paren_depth_local = math.max(paren_depth_local - 1, 0)
+      paren_depth = math.max(paren_depth - 1, 0)
     elseif ch == "[" then
       bracket_depth = bracket_depth + 1
     elseif ch == "]" then
@@ -659,7 +89,7 @@ local function split_top_level_csv(text)
       brace_depth = brace_depth + 1
     elseif ch == "}" then
       brace_depth = math.max(brace_depth - 1, 0)
-    elseif ch == "," and paren_depth_local == 0 and bracket_depth == 0 and brace_depth == 0 then
+    elseif ch == "," and paren_depth == 0 and bracket_depth == 0 and brace_depth == 0 then
       table.insert(items, trim(text:sub(start_index, i - 1)))
       start_index = i + 1
     end
@@ -673,33 +103,30 @@ local function split_top_level_csv(text)
   return items
 end
 
----@param text string
----@param keyword string
----@return integer?
 local function find_top_level_keyword(text, keyword)
-  local paren_depth_local = 0
+  local paren_depth = 0
   local bracket_depth = 0
   local brace_depth = 0
   local i = 1
 
   while i <= #text do
     local ch = text:sub(i, i)
-    if ch == "\"" then
+    if ch == '"' then
       i = i + 1
       while i <= #text do
         local str_ch = text:sub(i, i)
         if str_ch == "\\" then
           i = i + 2
-        elseif str_ch == "\"" then
+        elseif str_ch == '"' then
           break
         else
           i = i + 1
         end
       end
     elseif ch == "(" then
-      paren_depth_local = paren_depth_local + 1
+      paren_depth = paren_depth + 1
     elseif ch == ")" then
-      paren_depth_local = math.max(paren_depth_local - 1, 0)
+      paren_depth = math.max(paren_depth - 1, 0)
     elseif ch == "[" then
       bracket_depth = bracket_depth + 1
     elseif ch == "]" then
@@ -708,9 +135,9 @@ local function find_top_level_keyword(text, keyword)
       brace_depth = brace_depth + 1
     elseif ch == "}" then
       brace_depth = math.max(brace_depth - 1, 0)
-    elseif paren_depth_local == 0 and bracket_depth == 0 and brace_depth == 0 then
+    elseif paren_depth == 0 and bracket_depth == 0 and brace_depth == 0 then
       local slice = text:sub(i)
-      local start_pos, end_pos = slice:find("^" .. keyword .. "%f[%W]")
+      local start_pos = slice:find("^" .. keyword .. "%f[%W]")
       if start_pos ~= nil then
         return i + start_pos - 1
       end
@@ -719,8 +146,6 @@ local function find_top_level_keyword(text, keyword)
   end
 end
 
----@param text string
----@return table?, string?
 local function parse_header_segments(text)
   local segments = {}
   local cursor = 1
@@ -728,8 +153,8 @@ local function parse_header_segments(text)
 
   while i <= #text do
     local hash_open = text:sub(i, i + 1) == "#("
-    local open_index = nil
-    local open_token = nil
+    local open_index
+    local open_token
 
     if hash_open then
       open_index = i + 1
@@ -765,10 +190,6 @@ local function parse_header_segments(text)
   return segments, trim(text:sub(cursor))
 end
 
----@param indent string
----@param inner string
----@param sw integer
----@return string[]
 local function wrap_csv_body(indent, inner, sw)
   local out = {}
   local items = split_top_level_csv(inner)
@@ -784,9 +205,6 @@ local function wrap_csv_body(indent, inner, sw)
   return out
 end
 
----@param line string
----@param sw integer
----@return string[]?
 local function wrap_module_or_interface_header(line, sw)
   if line:find("//", 1, true) ~= nil then
     return nil
@@ -843,26 +261,167 @@ local function wrap_module_or_interface_header(line, sw)
   return out
 end
 
----@param lines string[]
----@param sw integer
----@return string[]
-local function wrap_long_lines(lines, sw)
+local function split_inline_comment(line)
+  local parser_state = layout.new_parser_state()
   local out = {}
-  for _, line in ipairs(lines) do
-    local wrapped = wrap_module_or_interface_header(line, sw)
-    if wrapped ~= nil then
-      vim.list_extend(out, wrapped)
+  local i = 1
+
+  while i <= #line do
+    if parser_state.in_string then
+      local j = i
+      while j <= #line do
+        local ch = line:sub(j, j)
+        if ch == "\\" then
+          j = j + 2
+        elseif ch == '"' then
+          parser_state.in_string = false
+          break
+        else
+          j = j + 1
+        end
+      end
+      table.insert(out, line:sub(i, math.min(j, #line)))
+      i = j + 1
+    elseif parser_state.in_block_comment then
+      local stop = line:find("*/", i, true)
+      if stop then
+        table.insert(out, line:sub(i, stop + 1))
+        i = stop + 2
+        parser_state.in_block_comment = false
+      else
+        return line, nil
+      end
     else
-      table.insert(out, line)
+      local pair = line:sub(i, i + 1)
+      local ch = line:sub(i, i)
+      if pair == "//" then
+        return table.concat(out), line:sub(i)
+      elseif pair == "/*" then
+        local stop = line:find("*/", i + 2, true)
+        if stop then
+          table.insert(out, line:sub(i, stop + 1))
+          i = stop + 2
+        else
+          return line, nil
+        end
+      elseif ch == '"' then
+        parser_state.in_string = true
+      end
+      if i <= #line then
+        table.insert(out, ch)
+        i = i + 1
+      end
     end
   end
-  return out
+
+  return table.concat(out), nil
 end
 
----@param line string
----@param sw integer
----@param parser_state bsv.ParserState
----@return string, bsv.ParserState
+local function normalize_record_colons(code)
+  local leading_keyword = first_keyword(code)
+  if leading_keyword == "import" or leading_keyword == "export" then
+    return code
+  end
+
+  local colon_index
+  local paren_depth = 0
+  local bracket_depth = 0
+  local brace_depth = 0
+  for i = 1, #code do
+    local ch = code:sub(i, i)
+    if ch == "(" then
+      paren_depth = paren_depth + 1
+    elseif ch == ")" then
+      paren_depth = math.max(paren_depth - 1, 0)
+    elseif ch == "[" then
+      bracket_depth = bracket_depth + 1
+    elseif ch == "]" then
+      bracket_depth = math.max(bracket_depth - 1, 0)
+    elseif ch == "{" then
+      brace_depth = brace_depth + 1
+    elseif ch == "}" then
+      brace_depth = math.max(brace_depth - 1, 0)
+    elseif ch == ":" and paren_depth == 0 and bracket_depth == 0 and brace_depth == 0 then
+      local prefix = trim(code:sub(1, i - 1))
+      if prefix ~= "" and not prefix:find("?", 1, true) then
+        colon_index = i
+      end
+      break
+    end
+  end
+
+  if colon_index == nil then
+    return code
+  end
+
+  local left = trim(code:sub(1, colon_index - 1))
+  local right = trim(code:sub(colon_index + 1))
+  if right == "" then
+    return left .. ":"
+  end
+  return left .. ": " .. right
+end
+
+local function normalize_code_chunk(code, sw)
+  if code == "" then
+    return code
+  end
+
+  local leading_keyword = first_keyword(code)
+  code = code:gsub("\t", string.rep(" ", sw))
+  code = code:gsub("%s+([,;%)%]}])", "%1")
+  code = code:gsub("%s*,%s*", ", ")
+  code = code:gsub(";%s*(%S)", "; %1")
+
+  for keyword in pairs(lang.control_keywords) do
+    code = code:gsub("(%f[%a]" .. keyword .. ")%s*%(", "%1 (")
+  end
+
+  for _, keyword in ipairs({ "begin", "action", "actionvalue", "seq", "par" }) do
+    code = code:gsub("%)%s*" .. keyword .. "%f[%W]", ") " .. keyword)
+    code = code:gsub("(%f[%a]else)%s*" .. keyword .. "%f[%W]", "%1 " .. keyword)
+  end
+
+  code = code:gsub("%)%s*if%s*%(", ") if (")
+  code = code:gsub("(%f[%a]rule%s+[%a_][%w_']*)%s*%(", "%1 (")
+  code = code:gsub("(%f[%a]case%s*%b())%s*matches%f[%W]", "%1 matches")
+  code = code:gsub("(%f[%a]provisos)%s*%(", "%1(")
+  code = code:gsub("([_%a][_%w']*)%s+%(", function(word)
+    if lang.paren_keywords[word] then
+      return word .. " ("
+    end
+    return word .. "("
+  end)
+  code = code:gsub("%(%s+", "(")
+  code = code:gsub("%s+%)", ")")
+
+  for op, token in pairs(lang.protected_ops) do
+    code = code:gsub("%s*" .. escape_lua_pattern(op) .. "%s*", " " .. token .. " ")
+  end
+
+  code = code:gsub("%s*=%s*", " = ")
+
+  if leading_keyword ~= "import" then
+    for _, op in ipairs(lang.spaced_single_char_ops) do
+      code = code:gsub("%s*" .. escape_lua_pattern(op) .. "%s*", " " .. op .. " ")
+    end
+  end
+
+  for op, token in pairs(lang.protected_ops) do
+    code = code:gsub(token, op)
+  end
+
+  code = code:gsub("%s*::%s*", "::")
+  code = code:gsub("([_%w%)%]])%s*{", "%1 {")
+  code = code:gsub("%(%s*%*", "(*")
+  code = code:gsub("%*%s*%)", "*)")
+  code = normalize_record_colons(code)
+  code = code:gsub("%s+%?%s+", " ? ")
+  code = code:gsub("%s+$", "")
+
+  return code
+end
+
 local function normalize_line(line, sw, parser_state)
   if line:match("^%s*$") then
     return "", parser_state
@@ -881,7 +440,7 @@ local function normalize_line(line, sw, parser_state)
         local str_ch = line:sub(j, j)
         if str_ch == "\\" then
           j = j + 2
-        elseif str_ch == "\"" then
+        elseif str_ch == '"' then
           table.insert(out, line:sub(i, j))
           i = j + 1
           in_string = false
@@ -929,20 +488,20 @@ local function normalize_line(line, sw, parser_state)
             in_string = false,
           }
         end
-      elseif ch == "\"" then
+      elseif ch == '"' then
         local j = i + 1
         while j <= #line do
           local str_ch = line:sub(j, j)
           if str_ch == "\\" then
             j = j + 2
-          elseif str_ch == "\"" then
+          elseif str_ch == '"' then
             j = j + 1
             break
           else
             j = j + 1
           end
         end
-        if j <= #line and line:sub(j - 1, j - 1) == "\"" then
+        if j <= #line and line:sub(j - 1, j - 1) == '"' then
           table.insert(out, line:sub(i, math.min(j - 1, #line)))
           i = j
         else
@@ -957,7 +516,7 @@ local function normalize_line(line, sw, parser_state)
         while j <= #line do
           local next_pair = line:sub(j, j + 1)
           local next_ch = line:sub(j, j)
-          if next_pair == "//" or next_pair == "/*" or next_ch == "\"" then
+          if next_pair == "//" or next_pair == "/*" or next_ch == '"' then
             break
           end
           j = j + 1
@@ -984,24 +543,15 @@ local function normalize_line(line, sw, parser_state)
   }
 end
 
----@param lines string[]
----@param sw integer
----@return string[]
 local function normalize_lines(lines, sw)
   local out = {}
-  local parser_state = {
-    in_block_comment = false,
-    in_string = false,
-  }
+  local parser_state = layout.new_parser_state()
   for i, line in ipairs(lines) do
     out[i], parser_state = normalize_line(line, sw, parser_state)
   end
   return out
 end
 
----@param state table
----@param info table
----@return boolean
 local function line_opens_scope(state, info)
   local header = state.header_stack[#state.header_stack]
   if header then
@@ -1012,12 +562,13 @@ local function line_opens_scope(state, info)
         paren_delta = 0,
         has_top_level_assignment = header.has_top_level_assignment,
       }
-      return is_scope_decl_line(state, header_info)
+      return layout.is_scope_decl_line(state, header_info)
     end
     return false
   end
+
   if info.decl_kind ~= nil and info.ends_with_semicolon and info.paren_delta <= 0 then
-    return is_scope_decl_line(state, info)
+    return layout.is_scope_decl_line(state, info)
   end
   if info.decl_kind ~= nil and not info.ends_with_semicolon then
     return true
@@ -1025,19 +576,13 @@ local function line_opens_scope(state, info)
   return info.opens_block or info.opens_brace
 end
 
----@param state table
----@param info table
----@return boolean
 local function is_top_level_function_open(state, info)
   return info.decl_kind == "function"
-    and is_scope_decl_line(state, info)
-    and base_depth(state) == 0
+    and layout.is_scope_decl_line(state, info)
+    and layout.base_depth(state) == 0
     and #state.header_stack == 0
 end
 
----@param state table
----@param info table
----@return boolean
 local function is_top_level_function_close(state, info)
   return info.keyword == "endfunction"
     and #state.decl_stack == 1
@@ -1047,26 +592,15 @@ local function is_top_level_function_close(state, info)
     and #state.header_stack == 0
 end
 
----@param lines string[]
----@return string[]
 local function normalize_blank_lines(lines)
   local out = {}
-  local state = {
-    decl_stack = {},
-    header_stack = {},
-    block_depth = 0,
-    brace_depth = 0,
-    parser_state = {
-      in_block_comment = false,
-      in_string = false,
-    },
-  }
+  local state = layout.new_state()
   local pending_blank = false
   local prev_nonblank_meta
 
   for _, line in ipairs(lines) do
     local info
-    info, state.parser_state = analyze_line(line, state.parser_state)
+    info, state.parser_state = layout.analyze_line(line, state.parser_state)
 
     if info.blank then
       pending_blank = prev_nonblank_meta ~= nil
@@ -1098,7 +632,7 @@ local function normalize_blank_lines(lines)
       end
 
       table.insert(out, line)
-      advance_indent_state(state, info)
+      layout.advance_state(state, info)
       prev_nonblank_meta = current_meta
     end
   end
@@ -1110,8 +644,6 @@ local function normalize_blank_lines(lines)
   return out
 end
 
----@param lines string[]
----@return string[]
 local function normalize_layout_spacing(lines)
   local out = {}
   local prev_nonblank
@@ -1129,7 +661,7 @@ local function normalize_layout_spacing(lines)
         local current_is_attr = stripped:match("^%(%*") ~= nil
         local current_starts_decl = current_is_attr
           or stripped:match("^typedef%s+") ~= nil
-          or (current_keyword ~= nil and (decl_openers[current_keyword] or current_keyword == "import" or current_keyword == "export"))
+          or (current_keyword ~= nil and (lang.decl_openers[current_keyword] or current_keyword == "import" or current_keyword == "export"))
 
         local need_blank = false
         if prev_keyword == "package" and current_starts_decl then
@@ -1141,7 +673,7 @@ local function normalize_layout_spacing(lines)
         then
           need_blank = true
         elseif prev_keyword ~= nil
-          and decl_closers[prev_keyword]
+          and lang.decl_closers[prev_keyword]
           and current_starts_decl
           and current_indent == prev_indent
         then
@@ -1161,54 +693,6 @@ local function normalize_layout_spacing(lines)
   return out
 end
 
----Produce a reindented copy of lines using simple keyword heuristics.
----@param lines string[]
----@param sw integer
----@return string[]
-local function reindent_lines(lines, sw)
-  local out = {}
-  local state = {
-    decl_stack = {},
-    header_stack = {},
-    block_depth = 0,
-    brace_depth = 0,
-    continuation_depth = 0,
-    parser_state = {
-      in_block_comment = false,
-      in_string = false,
-    },
-  }
-
-  for i, line in ipairs(lines) do
-    local info
-    info, state.parser_state = analyze_line(line, state.parser_state)
-
-    if line:match("^%s*$") then
-      out[i] = ""
-    else
-      local indent = indent_depth_for_line(state, info) * sw
-      if state.continuation_depth > 0 and not info.starts_with_closing_delim then
-        indent = indent + sw
-      end
-      local stripped = line:match("^%s*(.*)$")
-      out[i] = string.rep(" ", indent) .. stripped
-    end
-
-    advance_indent_state(state, info)
-    state.continuation_depth = math.max(
-      state.continuation_depth + info.continuation_delta + info.record_brace_delta
-        - (info.opens_brace and 1 or 0)
-        + (info.closes_brace and 1 or 0),
-      0
-    )
-  end
-  return out
-end
-
----@param line string
----@param indent string
----@param continuation_indent string
----@return string[]
 local function wrap_generic_long_line(line, indent, continuation_indent)
   local out = {}
   local current = trim(line)
@@ -1242,67 +726,109 @@ local function wrap_generic_long_line(line, indent, continuation_indent)
     end
 
     local head = trim(current:sub(1, break_at - 1))
-    local prefix = first and indent or continuation_indent
-    table.insert(out, prefix .. head)
+    table.insert(out, (first and indent or continuation_indent) .. head)
     current = trim(current:sub(break_at + 1))
     first = false
   end
 
-  local prefix = first and indent or continuation_indent
-  table.insert(out, prefix .. current)
+  table.insert(out, (first and indent or continuation_indent) .. current)
   return out
 end
 
----@param lines string[]
----@param sw integer
----@return string[]
-local function wrap_expression_lines(lines, sw)
-  local out = {}
-  local in_block_comment = false
-  local parser_state = {
-    in_block_comment = false,
-    in_string = false,
+local function wrap_ternary_line(line, indent, continuation_indent)
+  local code, comment = split_inline_comment(trim(line))
+  local q_index
+  local c_index
+  local paren_depth = 0
+  local bracket_depth = 0
+  local brace_depth = 0
+
+  for i = 1, #code do
+    local ch = code:sub(i, i)
+    if ch == "(" then
+      paren_depth = paren_depth + 1
+    elseif ch == ")" then
+      paren_depth = math.max(paren_depth - 1, 0)
+    elseif ch == "[" then
+      bracket_depth = bracket_depth + 1
+    elseif ch == "]" then
+      bracket_depth = math.max(bracket_depth - 1, 0)
+    elseif ch == "{" then
+      brace_depth = brace_depth + 1
+    elseif ch == "}" then
+      brace_depth = math.max(brace_depth - 1, 0)
+    elseif ch == "?" and paren_depth == 0 and bracket_depth == 0 and brace_depth == 0 then
+      q_index = i
+    elseif ch == ":" and q_index ~= nil and paren_depth == 0 and bracket_depth == 0 and brace_depth == 0 then
+      c_index = i
+      break
+    end
+  end
+
+  if q_index == nil or c_index == nil then
+    return nil
+  end
+
+  local lhs = trim(code:sub(1, q_index - 1))
+  local true_branch = trim(code:sub(q_index + 1, c_index - 1))
+  local false_branch = trim(code:sub(c_index + 1))
+  if lhs == "" or true_branch == "" or false_branch == "" then
+    return nil
+  end
+
+  local out = {
+    indent .. lhs,
+    continuation_indent .. "? " .. true_branch,
+    continuation_indent .. ": " .. false_branch,
   }
-  local continuation_depth = 0
 
-  for _, line in ipairs(lines) do
-    local info
-    info, parser_state = analyze_line(line, parser_state)
-    local indent = line:match("^(%s*)") or ""
-    local stripped = trim(line)
-
-    if line == "" or parser_state.in_block_comment or parser_state.in_string or line:find("//", 1, true) ~= nil or #line <= max_columns then
-      table.insert(out, line)
-    else
-      local continuation_indent = indent .. string.rep(" ", sw)
-      vim.list_extend(out, wrap_generic_long_line(line, indent, continuation_indent))
-    end
-
-    continuation_depth = math.max(
-      continuation_depth + info.continuation_delta + info.record_brace_delta
-        - (info.opens_brace and 1 or 0)
-        + (info.closes_brace and 1 or 0),
-      0
-    )
-    if stripped == "" then
-      continuation_depth = continuation_depth
-    end
+  if comment ~= nil then
+    out[#out] = out[#out] .. " " .. comment:gsub("^//%s*", "// ")
   end
 
   return out
 end
 
----Resolve shiftwidth, defaulting to the 2-space indent expected by `bsv-style.md`.
----@param bufnr integer
----@return integer
-local function resolve_shiftwidth(bufnr)
-  -- Stick to two-space indentation for BSV regardless of user overrides.
+local function wrap_expression_lines(lines, sw)
+  local out = {}
+  for _, line in ipairs(lines) do
+    local indent = line:match("^(%s*)") or ""
+    local stripped = trim(line)
+
+    if line == "" or line:find("//", 1, true) ~= nil and #line <= max_columns then
+      table.insert(out, line)
+    elseif #line <= max_columns then
+      table.insert(out, line)
+    else
+      local continuation_indent = indent .. string.rep(" ", sw)
+      local wrapped = wrap_ternary_line(line, indent, continuation_indent)
+      if wrapped ~= nil then
+        vim.list_extend(out, wrapped)
+      else
+        vim.list_extend(out, wrap_generic_long_line(stripped, indent, continuation_indent))
+      end
+    end
+  end
+  return out
+end
+
+local function wrap_long_lines(lines, sw)
+  local out = {}
+  for _, line in ipairs(lines) do
+    local wrapped = wrap_module_or_interface_header(line, sw)
+    if wrapped ~= nil then
+      vim.list_extend(out, wrapped)
+    else
+      table.insert(out, line)
+    end
+  end
+  return out
+end
+
+local function resolve_shiftwidth(_)
   return 2
 end
 
----Try to run LSP formatting for the buffer.
----@param bufnr integer
----@return boolean did_run
 local function try_lsp_format(bufnr)
   local clients = vim.lsp.get_clients({ bufnr = bufnr, method = "textDocument/formatting" })
   if #clients == 0 then
@@ -1312,8 +838,16 @@ local function try_lsp_format(bufnr)
   return true
 end
 
----Format the current buffer: prefer LSP, fallback to style normalization + reindent.
----@param opts? { bufnr?: integer, async?: boolean }
+local function format_lines(lines, sw)
+  lines = normalize_lines(lines, sw)
+  lines = wrap_long_lines(lines, sw)
+  lines = layout.reindent_lines(lines, sw)
+  lines = normalize_blank_lines(lines)
+  lines = normalize_layout_spacing(lines)
+  lines = wrap_expression_lines(lines, sw)
+  return lines
+end
+
 function M.format_buffer(opts)
   opts = opts or {}
   local bufnr = opts.bufnr or vim.api.nvim_get_current_buf()
@@ -1323,42 +857,29 @@ function M.format_buffer(opts)
 
   local sw = resolve_shiftwidth(bufnr)
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-  lines = normalize_lines(lines, sw)
-  lines = wrap_long_lines(lines, sw)
-  lines = reindent_lines(lines, sw)
-  lines = normalize_blank_lines(lines)
-  lines = normalize_layout_spacing(lines)
-  lines = wrap_expression_lines(lines, sw)
-  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, format_lines(lines, sw))
 end
 
----Register a Conform formatter (no-op if conform.nvim is absent).
 function M.register_conform()
   local ok, conform = pcall(require, "conform")
   if not ok then
     return
   end
 
-  if not conform.formatters then
-    conform.formatters = {}
-  end
+  conform.formatters = conform.formatters or {}
+  conform.formatters_by_ft = conform.formatters_by_ft or {}
 
   if not conform.formatters.bsvfmt then
     conform.formatters.bsvfmt = {
       meta = {
         url = "https://github.com/ArchSerein/bsv.nvim",
-        description = "Bluespec: prefer LSP formatting, fallback to style normalization",
+        description = "Bluespec formatter with conservative spacing and indentation",
       },
       format = function(_, ctx, lines, callback)
         if try_lsp_format(ctx.buf) then
           lines = vim.api.nvim_buf_get_lines(ctx.buf, 0, -1, false)
         else
-          lines = normalize_lines(lines, resolve_shiftwidth(ctx.buf))
-          lines = wrap_long_lines(lines, resolve_shiftwidth(ctx.buf))
-          lines = reindent_lines(lines, resolve_shiftwidth(ctx.buf))
-          lines = normalize_blank_lines(lines)
-          lines = normalize_layout_spacing(lines)
-          lines = wrap_expression_lines(lines, resolve_shiftwidth(ctx.buf))
+          lines = format_lines(lines, resolve_shiftwidth(ctx.buf))
         end
         callback(nil, lines)
       end,
@@ -1370,11 +891,8 @@ function M.register_conform()
   end
 end
 
----Buffer-local setup for formatting defaults.
----@param bufnr? integer
 function M.setup_buffer(bufnr)
   bufnr = bufnr or vim.api.nvim_get_current_buf()
-  -- Use LSP formatexpr when available; it safely no-ops otherwise.
   vim.bo[bufnr].formatexpr = "v:lua.vim.lsp.formatexpr()"
   M.register_conform()
 end

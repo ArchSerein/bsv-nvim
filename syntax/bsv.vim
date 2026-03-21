@@ -1,107 +1,52 @@
-" syntax/bsv.vim
-" Fallback regex-based syntax highlighting for Bluespec SystemVerilog (BSV).
-" This is intentionally conservative. Tree-sitter highlighting is preferred.
-
 if exists("b:current_syntax")
   finish
 endif
 
-" Comments
+let s:lang = luaeval('require("bsv.lang")')
+
+function! s:define_keywords(group, words) abort
+  if empty(a:words)
+    return
+  endif
+  execute 'syn keyword ' . a:group . ' ' . join(a:words, ' ')
+endfunction
+
 syn match  bsvLineComment  "//.*$"
-syn region bsvBlockComment start="/\*" end="\*/" contains=bsvBlockComment
-" BSV attribute / pragma blocks: (* ... *)
+syn region bsvBlockComment start="/\*" end="\*/" keepend
 syn region bsvPragma start="(\*" end="\*)" keepend
 
-" Strings
-syn region bsvString start=+"+ skip=+\\."+ end=+"+ keepend
+syn region bsvString start=+"+ skip=+\\.+ end=+"+ keepend
 
-" Numbers (simple)
-syn match bsvNumber "\v<\d+>"
-syn match bsvNumber "\v<\d+'\s*[sS]?[bBoOdDhH]\s*[0-9a-fA-F_xXzZ?]+>"
-syn match bsvFloat  "\v<\d+\.\d+([eE][+-]?\d+)?>"
+syn match bsvNumber "\\v<\\d+'\\s*[sS]?[bBoOdDhH]\\s*[0-9a-fA-F_xXzZ?]+>"
+syn match bsvNumber "\\v<'[01]>"
+syn match bsvNumber "\\v<[-+]?\\d[\\d_]*>"
+syn match bsvFloat  "\\v<\\d[\\d_]*\\.\\d[\\d_]*([eE][+-]?\\d[\\d_]*)?>"
 
-" Preprocessor / compiler directives (backtick)
-syn match bsvPreProc "\v^\s*`(include|define|undef|ifdef|ifndef|elsif|else|endif)\b.*$"
+syn match bsvPreProc "\\v`(include|line|define|undef|ifdef|ifndef|elsif|else|endif|resetall)\\>"
+syn match bsvSystemTask "\\v\\$[A-Za-z_][A-Za-z0-9_$]*"
+syn match bsvBuiltin "\\v<(pack|unpack|fromInteger|fromSizedInteger|fromReal|fromString|noAction|valueOf|valueof)>"
 
-" System tasks/functions (e.g. $display)
-syn match bsvSystemTask "\v\$\h\w*"
+call s:define_keywords('bsvKeyword', s:lang.core_keywords)
+call s:define_keywords('bsvType', s:lang.types)
+call s:define_keywords('bsvTypeClass', s:lang.typeclasses)
+call s:define_keywords('bsvBoolean', s:lang.constants)
 
-" Keywords (BSV-centric; includes some SV control words)
-syn keyword bsvKeyword
-      \ package endpackage import export
-      \ module endmodule interface endinterface
-      \ method endmethod function endfunction
-      \ rule endrule rules endrules
-      \ action endaction actionvalue endactionvalue
-      \ begin end
-      \ if else case endcase default
-      \ for while repeat forever break continue return
-      \ let match matches
-      \ typedef struct enum tagged union
-      \ typeclass endtypeclass instance endinstance
-      \ provisos dependencies determines deriving
-      \ seq endseq par endpar
-      \ clocked_by reset_by default_clock default_reset
-      \ input_clock input_reset output_clock output_reset
+syn match bsvOperator "==\|!=\|<=\|>=\|<-\|<<\|>>\|&&&\|&&\|||\|~&\|~|\|\^~\|~\^\|::"
+syn match bsvOperator "+\|-\|\*\|/\|%\|=\|<\|>\|\^\|~\|!\|&\||\|?\|:"
 
-" Built-in types (seeded from VS Code grammar)
-syn keyword bsvType
-      \ void Action ActionValue Integer Nat Real Inout
-      \ Bit UInt Int Bool Maybe String Either Rules Module
-      \ Clock Reset Power Empty Array
-      \ Reg RWire Wire BypassWire DWire PulseWire ReadOnly WriteOnly
-      \ Vector List RegFile FIFO FIFOF Stmt
-
-" Typeclasses and type-level math (seeded from VS Code grammar)
-syn keyword bsvTypeClass
-      \ Bits DefaultValue Eq Ord Bounded Arith Literal Bitwise BitReduction BitExtend FShow IsModule
-      \ Add Max Log Mul Div TAdd TSub TLog TExp TMul TDiv TMin TMax
-
-syn keyword bsvBoolean True False
-
-" Operators (SAFE VERSION)
-syn match bsvOperator "=="
-syn match bsvOperator "!="
-syn match bsvOperator "<="
-syn match bsvOperator ">="
-syn match bsvOperator "<-"
-syn match bsvOperator "<<"
-syn match bsvOperator ">>"
-
-syn match bsvOperator "="
-syn match bsvOperator "<"
-syn match bsvOperator ">"
-
-syn match bsvOperator "&&&"
-syn match bsvOperator "&&"
-syn match bsvOperator "||"
-
-syn match bsvOperator "+"
-syn match bsvOperator "-"
-syn match bsvOperator "*"
-syn match bsvOperator "/"
-syn match bsvOperator "%"
-syn match bsvOperator "^"
-syn match bsvOperator "~"
-syn match bsvOperator "!"
-syn match bsvOperator "&"
-syn match bsvOperator "|"
-syn match bsvOperator "?"
-syn match bsvOperator ":"
-
-" Highlight links
-hi def link bsvLineComment   Comment
-hi def link bsvBlockComment  Comment
-hi def link bsvPragma        PreProc
-hi def link bsvString        String
-hi def link bsvNumber        Number
-hi def link bsvFloat         Float
-hi def link bsvPreProc       PreProc
-hi def link bsvSystemTask    Function
-hi def link bsvKeyword       Keyword
-hi def link bsvType          Type
-hi def link bsvTypeClass     Type
-hi def link bsvBoolean       Boolean
-hi def link bsvOperator      Operator
+hi def link bsvLineComment Comment
+hi def link bsvBlockComment Comment
+hi def link bsvPragma PreProc
+hi def link bsvString String
+hi def link bsvNumber Number
+hi def link bsvFloat Float
+hi def link bsvPreProc PreProc
+hi def link bsvSystemTask Function
+hi def link bsvBuiltin Function
+hi def link bsvKeyword Keyword
+hi def link bsvType Type
+hi def link bsvTypeClass Type
+hi def link bsvBoolean Boolean
+hi def link bsvOperator Operator
 
 let b:current_syntax = "bsv"
