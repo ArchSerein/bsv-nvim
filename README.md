@@ -1,111 +1,56 @@
 # bsv.nvim
 
-A small **Lua-first Neovim plugin** for Bluespec SystemVerilog (BSV), including highlighting and LSP integration.
+Neovim runtime support for Bluespec SystemVerilog (`.bsv` and `.bs`) based on the Bluespec SystemVerilog reference guide in this repository.
 
 ## Features
 
-- Filetype detection for `.bsv` / `.BSV`
-- Tree-sitter highlighting (preferred) via `queries/bsv/highlights.scm` (compatible with `todo-comments.nvim`)
-- Fallback Vim regex syntax highlighting via `syntax/bsv.vim`
-- Built-in LSP config for [`blues-lsp`](https://crates.io/crates/blues-lsp)
-- Formatting: prefers LSP; falls back to a conservative 2-space style pass, and auto-registers a Conform formatter
-- Minimal ftplugin: `commentstring=// %s`
+- Filetype detection for Bluespec files.
+- Syntax highlighting for BSV keywords, SystemVerilog-reserved identifiers, comments, strings, numeric literals, compiler directives, attributes, and system tasks.
+- Indentation support for common BSV block keywords.
+- `:BsvFormat` formatter command with a conservative Google-style profile:
+  - 2-space indentation by default.
+  - Spaces around binary operators.
+  - Compact function/type application such as `foo(x)` and `Bit#(32)`.
+  - Trimmed trailing whitespace.
+- Save-time formatting is disabled by default. Use `:BsvFormat` to format manually.
 
-## Requirements
+The formatter is intentionally conservative. It does not reorder declarations, wrap expressions, or attempt semantic rewrites.
 
-- Neovim 0.11.x (latest stable recommended)
-- For Tree-sitter highlighting: a BSV parser installed (see below)
+## Setup
 
-## Installation
+With a plugin manager, load this directory as a normal Neovim plugin. The plugin auto-registers commands and default settings.
 
-```bash
-git clone https://github.com/ArchSerein/bsv-nvim.git ~/.config/nvim/plugins/bsv.nvim
-nvim test.bsv
-```
-
-## Tree-sitter parser installation
-
-This plugin ships only query files. You must install a BSV Tree-sitter parser separately.
-
-Recommended grammar: https://github.com/yuyuranium/tree-sitter-bsv
-
-```bash
-git clone https://github.com/yuyuranium/tree-sitter-bsv
-tree-sitter generate
-cc -O2 -fPIC -c src/parser.c
-cc -shared parser.o -o ~/.local/share/nvim/site/parser/bsv.so
-```
-
-## Snippets (LuaSnip)
-
-This plugin ships a VSCode snippet package under `snippets/`.
-To load it:
-
-```lua
-require("luasnip.loaders.from_vscode").lazy_load()
-```
-
-## LSP (`blues-lsp`)
-
-This plugin ships an LSP config in `lsp/blues.lua` and an optional helper `require("bsv").setup` integration.
-
-### Install `blues-lsp`
-
-`blues-lsp` is published on crates.io, so you can install it with Cargo:
-
-```bash
-cargo install blues-lsp --locked
-```
-
-After installation, check which binary exists in your environment:
-
-```bash
-command -v blues-lsp || command -v blues
-```
-
-`bsv.nvim` defaults to `blues-lsp` and will automatically fall back to `blues` if needed.
-
-### Neovim 0.11+ builtin LSP
+Optional configuration:
 
 ```lua
 require("bsv").setup({
-  lsp = { enable = true },
+  indent_width = 2,
+  max_columns = 100,
+  format_on_save = false,
+  trim_trailing_whitespace = true,
 })
 ```
 
-### Manual setup with `nvim-lspconfig`
+Enable format-on-save per buffer:
 
-```lua
-require("lspconfig").blues.setup({})
+```vim
+:BsvFormatEnable
 ```
 
-## Formatting
+Format manually:
 
-- If an LSP client that supports `textDocument/formatting` is attached, `:format`/`gq` will use it.
-- Otherwise a conservative 2-space style pass is used: key whitespace rules from `bsv-style.md` are normalized first, then the buffer is reindented with the same block heuristics as the indent script (enforced even if `shiftwidth` is different).
-- When `conform.nvim` is installed (used by LazyVim), a `bsvfmt` formatter is registered automatically and wired to the `bsv` filetype.
+```vim
+:BsvFormat
+```
 
-## lazy.nvim example
+Trim only trailing whitespace:
 
-```lua
-return {
-  {
-    dir = vim.fn.stdpath("config") .. "/plugins/bsv.nvim",
-    name = "bsv.nvim",
-    lazy = false,
-    priority = 1000,
-    config = function()
-      require("bsv").setup({
-        lsp = {
-          enable = true,
-          -- optional: force binary if needed
-          cmd = { "blues-lsp" },
-        },
-        -- Formatting is enabled by default; disable if you prefer your own
-        -- format-on-save stack:
-        -- format = { enable = false },
-      })
-    end,
-  },
-}
+```vim
+:BsvTrimTrailingWhitespace
+```
+
+Visual selections are supported:
+
+```vim
+:'<,'>BsvFormat
 ```

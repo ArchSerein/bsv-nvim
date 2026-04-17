@@ -1,28 +1,48 @@
--- lua/bsv/init.lua
--- Optional user-facing setup (plugin works without calling setup()).
-
 local M = {}
 
----@class bsv.SetupOpts
----@field treesitter? { register?: boolean, url?: string }
----@field lsp? { enable?: boolean, name?: string, cmd?: string[], root_markers?: string[] }
----@field format? { enable?: boolean }
----@field silent? boolean
+local defaults = {
+  indent_width = 2,
+  max_columns = 100,
+  format_on_save = false,
+  trim_trailing_whitespace = true,
+}
 
----@param opts? bsv.SetupOpts
+M.config = vim.deepcopy(defaults)
+
 function M.setup(opts)
-	opts = opts or {}
-	if opts.treesitter and opts.treesitter.register then
-		require("bsv.treesitter").register(opts.treesitter)
-	end
+  M.config = vim.tbl_deep_extend("force", vim.deepcopy(defaults), opts or {})
 
-	if opts.lsp and opts.lsp.enable then
-		require("bsv.lsp").enable(opts.lsp)
-	end
+  local group = vim.api.nvim_create_augroup("bsv_nvim", { clear = true })
 
-	if not opts.format or opts.format.enable ~= false then
-		require("bsv.format").setup_buffer()
-	end
+  vim.api.nvim_create_autocmd("FileType", {
+    group = group,
+    pattern = "bsv",
+    callback = function(args)
+      vim.bo[args.buf].commentstring = "// %s"
+      vim.bo[args.buf].expandtab = true
+      vim.bo[args.buf].shiftwidth = M.config.indent_width
+      vim.bo[args.buf].tabstop = M.config.indent_width
+      vim.bo[args.buf].softtabstop = M.config.indent_width
+    end,
+  })
+
+  vim.api.nvim_create_autocmd("BufWritePre", {
+    group = group,
+    pattern = { "*.bsv", "*.bs" },
+    callback = function(args)
+      if vim.b[args.buf].bsv_format_on_save == false then
+        return
+      end
+      if vim.b[args.buf].bsv_format_on_save or M.config.format_on_save then
+        require("bsv.format").buffer({
+          bufnr = args.buf,
+          trim_trailing_whitespace = M.config.trim_trailing_whitespace,
+        })
+      end
+    end,
+  })
 end
+
+M.format = require("bsv.format")
 
 return M
