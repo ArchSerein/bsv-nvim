@@ -11,11 +11,26 @@ setlocal indentkeys+=0=endpackage,0=endrule,0=endrules,0=endtypeclass,0=else
 
 let b:undo_indent = "setlocal autoindent< indentexpr< indentkeys<"
 
+function! s:StripComments(line) abort
+  let code = a:line
+  let code = substitute(code, '/\*.\{-}\*/', ' ', 'g')
+  let code = substitute(code, '//.*$', '', '')
+  let code = substitute(code, '/\*.*$', '', '')
+  return code
+endfunction
+
+function! s:IsCommentOnlyOrBlank(line) abort
+  if a:line =~# '^\s*\*' || a:line =~# '^\s*\*/'
+    return 1
+  endif
+  return s:StripComments(a:line) =~# '^\s*$'
+endfunction
+
 function! s:PrevCodeLine(lnum) abort
   let lnum = a:lnum - 1
   while lnum > 0
     let line = getline(lnum)
-    if line !~# '^\s*$' && line !~# '^\s*//'
+    if !s:IsCommentOnlyOrBlank(line)
       return lnum
     endif
     let lnum -= 1
@@ -32,7 +47,7 @@ function! s:StartsWithElse(line) abort
 endfunction
 
 function! s:OpensBlock(line) abort
-  let code = substitute(a:line, '//.*$', '', '')
+  let code = s:StripComments(a:line)
   if code =~# '\<\(package\|module\|interface\|function\|instance\|typeclass\|rule\|rules\|action\|actionvalue\|begin\|case\)\>'
         \ && code !~# '\<\(endmodule\|endinterface\|endfunction\|endinstance\|endtypeclass\|endrule\|endrules\|endaction\|endactionvalue\|endcase\|end\)\>'
     return 1
@@ -47,14 +62,14 @@ function! s:OpensBlock(line) abort
 endfunction
 
 function! s:GetBSVIndent(lnum) abort
-  let line = getline(a:lnum)
+  let line = s:StripComments(getline(a:lnum))
   let prev_lnum = s:PrevCodeLine(a:lnum)
   if prev_lnum == 0
     return 0
   endif
 
   let ind = indent(prev_lnum)
-  let prev = getline(prev_lnum)
+  let prev = s:StripComments(getline(prev_lnum))
 
   if s:OpensBlock(prev)
     let ind += shiftwidth()

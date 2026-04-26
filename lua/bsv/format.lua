@@ -175,42 +175,73 @@ local function strip_strings(code)
   return table.concat(out)
 end
 
-local function split_code_comment(line, in_block_comment)
-  if in_block_comment then
-    local close_at = line:find("%*/", 1)
-    if close_at then
-      return "", line, false
-    end
-    return "", line, true
+local function push_segment(segments, kind, text)
+  if text == "" then
+    return
   end
 
+  local prev = segments[#segments]
+  if prev and prev.kind == kind then
+    prev.text = prev.text .. text
+    return
+  end
+
+  segments[#segments + 1] = { kind = kind, text = text }
+end
+
+local function split_line_segments(line, in_block_comment)
+  local segments = {}
+  local mode = in_block_comment and "comment" or "code"
+  local open_comment_after_code
   local i = 1
+  local start = 1
+
   while i <= #line do
     local ch = line:sub(i, i)
     local next_two = line:sub(i, i + 1)
-    if ch == '"' then
-      i = i + 1
-      while i <= #line do
-        local c = line:sub(i, i)
-        if c == "\\" then
-          i = i + 2
-        elseif c == '"' then
-          i = i + 1
-          break
-        else
-          i = i + 1
+
+    if mode == "code" then
+      if ch == '"' then
+        i = i + 1
+        while i <= #line do
+          local c = line:sub(i, i)
+          if c == "\\" then
+            i = i + 2
+          elseif c == '"' then
+            i = i + 1
+            break
+          else
+            i = i + 1
+          end
         end
+      elseif next_two == "//" then
+        push_segment(segments, "code", line:sub(start, i - 1))
+        push_segment(segments, "comment", line:sub(i))
+        return segments, false
+      elseif next_two == "/*" then
+        open_comment_after_code = line:sub(start, i - 1):match("%S") ~= nil
+        push_segment(segments, "code", line:sub(start, i - 1))
+        mode = "comment"
+        start = i
+        i = i + 2
+      else
+        i = i + 1
       end
-    elseif next_two == "//" then
-      return line:sub(1, i - 1), line:sub(i), false
-    elseif next_two == "/*" then
-      return line:sub(1, i - 1), line:sub(i), not line:find("%*/", i + 2)
     else
-      i = i + 1
+      if next_two == "*/" then
+        i = i + 2
+        push_segment(segments, "comment", line:sub(start, i - 1))
+        mode = "code"
+        open_comment_after_code = nil
+        start = i
+      else
+        i = i + 1
+      end
     end
   end
 
-  return line, nil, false
+  push_segment(segments, mode, line:sub(start))
+  return segments, mode == "comment", open_comment_after_code
 end
 
 local function tokenize(code)
@@ -377,6 +408,23 @@ local function format_code(code)
   return table.concat(out)
 end
 
+local function format_code_segment(code, has_code_before)
+  if not has_code_before then
+    return format_code(code)
+  end
+
+  local anchor = "__bsv_prev__"
+  local with_anchor = format_code(anchor .. " " .. code)
+  local prefix = anchor .. " "
+  if with_anchor:sub(1, #prefix) == prefix then
+    return with_anchor:sub(#prefix + 1)
+  end
+  if with_anchor:sub(1, #anchor) == anchor then
+    return (with_anchor:sub(#anchor + 1):gsub("^%s+", ""))
+  end
+  return format_code(code)
+end
+
 local function pop_stack(stack, close_word)
   local wanted = close_to_open[close_word]
   if not wanted then
@@ -493,13 +541,43 @@ local function format_lines(lines, opts)
   local stack = {}
   local formatted = {}
   local in_block_comment = false
+  local block_comment_after_code = false
 
   for _, line in ipairs(lines) do
-    local code, comment
+    local segments
+    local opened_comment_after_code
+    local started_in_block_comment = in_block_comment
     line = opts.trim_trailing_whitespace and trim_trailing_whitespace(line) or line
-    code, comment, in_block_comment = split_code_comment(line, in_block_comment)
+    segments, in_block_comment, opened_comment_after_code = split_line_segments(line, in_block_comment)
 
-    local stripped_code = strip_strings(code or "")
+    local code_parts = {}
+    local rendered_parts = {}
+    local has_code_before = started_in_block_comment and block_comment_after_code
+    for _, segment in ipairs(segments) do
+      if segment.kind == "code" then
+        if segment.text:match("%S") then
+          code_parts[#code_parts + 1] = segment.text
+        end
+
+        local body = format_code_segment(segment.text, has_code_before)
+        if body ~= "" then
+          rendered_parts[#rendered_parts + 1] = body
+          has_code_before = true
+        end
+      elseif segment.kind == "comment" then
+        rendered_parts[#rendered_parts + 1] = trim(segment.text)
+      end
+    end
+
+    if in_block_comment then
+      if opened_comment_after_code ~= nil then
+        block_comment_after_code = opened_comment_after_code
+      end
+    else
+      block_comment_after_code = false
+    end
+
+    local stripped_code = strip_strings(table.concat(code_parts, " "))
     local close_word = starts_with_closer(stripped_code)
     if close_word then
       pop_stack(stack, close_word)
@@ -515,13 +593,9 @@ local function format_lines(lines, opts)
     end
 
     local indent = string.rep(" ", math.max(level, 0) * indent_width)
-    local body = format_code(code or "")
+    local body = table.concat(rendered_parts, " ")
 
-    if body == "" and comment then
-      formatted[#formatted + 1] = indent .. trim(comment)
-    elseif comment then
-      formatted[#formatted + 1] = indent .. body .. " " .. trim(comment)
-    elseif body == "" then
+    if body == "" then
       formatted[#formatted + 1] = ""
     else
       formatted[#formatted + 1] = indent .. body

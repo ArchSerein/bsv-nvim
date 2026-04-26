@@ -55,10 +55,6 @@ syntax match bsvNumber "\v<\d+\.\d*([eE][+-]?\d+)?>"
 syntax match bsvNumber "\v<\d+>"
 
 syntax region bsvString start=+"+ skip=+\\\\\|\\"+ end=+"+
-syntax region bsvComment start="/\*" end="\*/" contains=bsvTodo
-syntax match bsvComment "//.*$" contains=bsvTodo
-syntax keyword bsvTodo TODO FIXME NOTE XXX contained
-
 syntax region bsvAttribute start="(\*" end="\*)" contains=bsvString,bsvNumber,bsvKeyword
 
 syntax match bsvOperator "<-"
@@ -72,9 +68,13 @@ syntax match bsvOperator "<<"
 syntax match bsvOperator ">>"
 syntax match bsvOperator "<<<"
 syntax match bsvOperator ">>>"
-syntax match bsvOperator "~\^"
-syntax match bsvOperator "\^~"
+syntax match bsvOperator "\V~^"
+syntax match bsvOperator "\V^~"
 syntax match bsvOperator "[=+\-*/%&|^~?:<>]"
+
+syntax region bsvComment start="/\*" end="\*/" keepend contains=bsvTodo
+syntax match bsvComment "//.*$" contains=bsvTodo
+syntax keyword bsvTodo TODO FIXME NOTE XXX contained
 
 highlight default link bsvKeyword Keyword
 highlight default link bsvEnd Keyword
